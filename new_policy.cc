@@ -74,7 +74,7 @@ uint32_t GetVictimInSet(
                 return w;
             }
         }
-        // Aging: in the first attempt, age by +1; if still none found, do a stronger aging (+2 saturating)
+        // Aging step
         if (attempt == 0) {
             for (uint32_t w = 0; w < LLC_WAYS; w++) {
                 if (repl_rrpv[cpu][set][w] < MAX_RRPV) {
@@ -84,8 +84,9 @@ uint32_t GetVictimInSet(
         } else {
             for (uint32_t w = 0; w < LLC_WAYS; w++) {
                 if (repl_rrpv[cpu][set][w] < MAX_RRPV) {
-                    // stronger aging to force eviction when stuck (helps streaming/thrashing)
-                    repl_rrpv[cpu][set][w] = (repl_rrpv[cpu][set][w] + 2 > MAX_RRPV) ? MAX_RRPV : repl_rrpv[cpu][set][w] + 2;
+                    repl_rrpv[cpu][set][w] =
+                        (repl_rrpv[cpu][set][w] + 2 > MAX_RRPV) ?
+                        MAX_RRPV : repl_rrpv[cpu][set][w] + 2;
                 }
             }
         }
@@ -111,20 +112,19 @@ void UpdateReplacementState(
     uint8_t &line_reused = repl_reused[cpu][set][way];
 
     if (hit) {
-        // On hit: mark reused, promote to MRU AND strengthen SHCT for the signature
+        // On hit: mark reused, promote to MRU AND strengthen SHCT
         stat_hits++;
         line_reused = 1;
         line_rrpv   = 0;
-        // strengthen SHCT for this signature (helps learning faster)
         uint16_t sig = line_sig & (SHCT_SIZE - 1);
         if (sig < SHCT_SIZE) sat_inc(SHCT[sig], SHCT_MAX);
         return;
     }
 
-    // On miss: we have evicted the old block at (set,way)
+    // On miss
     stat_misses++;
 
-    // Update SHCT based on whether the evicted block was reused
+    // Update SHCT for the evicted block
     uint16_t old_sig = line_sig & (SHCT_SIZE - 1);
     if (old_sig < SHCT_SIZE) {
         if (line_reused) {
@@ -134,23 +134,18 @@ void UpdateReplacementState(
         }
     }
 
-    // Compute new signature for incoming block (keep same scheme)
+    // Compute new signature
     uint16_t newsig = (uint32_t)(PC >> SIGN_SHIFT) & (SHCT_SIZE - 1);
-    line_sig   = newsig;
-    line_reused = 0;  // reset reuse bit
+    line_sig    = newsig;
+    line_reused = 0;
 
-    // Adaptive insertion policy:
-    // - Very confident predictors (SHCT >= THRESHOLD+2) -> strong MRU (RRPV = 0)
-    // - Moderately confident (SHCT >= THRESHOLD) -> near-MRU (RRPV = 1)
-    // - Weakly confident but not zero -> less favored (RRPV = MAX_RRPV - 1)
-    // - Low confidence -> usual victim-friendly (RRPV = MAX_RRPV)
+    // Adaptive insertion policy
     uint8_t pred = SHCT[newsig];
     if (pred >= (uint8_t)(THRESHOLD + 2)) {
         line_rrpv = 0;
     } else if (pred >= (uint8_t)THRESHOLD) {
         line_rrpv = 1;
     } else if (pred > 0) {
-        // give a small chance to survive short-term
         line_rrpv = (MAX_RRPV >= 2) ? MAX_RRPV - 1 : MAX_RRPV;
     } else {
         line_rrpv = MAX_RRPV;
@@ -162,4 +157,11 @@ void PrintStats() {
     std::cout << "=== SHiP-RRIP+ Statistics ===\n";
     std::cout << "  Total Hits    : " << stat_hits   << "\n";
     std::cout << "  Total Misses  : " << stat_misses << "\n";
+}
+
+// Print heartbeat (called periodically during simulation)
+void PrintStats_Heartbeat() {
+    // A lightweight summary
+    std::cout << "[Heartbeat] Hits: " << stat_hits
+              << "  Misses: " << stat_misses << std::endl;
 }
